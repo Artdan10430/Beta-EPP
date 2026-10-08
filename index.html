@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Abeja de Seguridad EPP - Gráficos Pro</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    body {
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+      touch-action: manipulation;
+    }
+    #game-container {
+      position: relative;
+      width: 100%;
+      max-width: 850px;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.8), 0 0 20px rgba(245, 158, 11, 0.2);
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid #334155;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(15, 23, 42, 0.88);
+      backdrop-filter: blur(4px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      text-align: center;
+      padding: 20px;
+      z-index: 10;
+    }
+    .overlay h1 {
+      font-size: 2.2rem;
+      color: #facc15;
+      margin-bottom: 12px;
+      text-shadow: 0 0 15px rgba(250, 204, 21, 0.5);
+    }
+    .overlay p {
+      font-size: 1.05rem;
+      margin-bottom: 24px;
+      max-width: 450px;
+      line-height: 1.5;
+      color: #cbd5e1;
+    }
+    .btn {
+      background: linear-gradient(135deg, #fbbf24, #f59e0b);
+      color: #000;
+      font-weight: 800;
+      font-size: 1.25rem;
+      padding: 14px 36px;
+      border: none;
+      border-radius: 30px;
+      cursor: pointer;
+      box-shadow: 0 6px 20px rgba(245, 158, 11, 0.5);
+      transition: all 0.2s ease;
+    }
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 25px rgba(245, 158, 11, 0.7);
+    }
+    .btn:active {
+      transform: translateY(1px);
+    }
+    .hidden {
+      display: none !important;
+    }
+    #controls-hint {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255,255,255,0.5);
+      font-size: 0.85rem;
+      pointer-events: none;
+      letter-spacing: 0.5px;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="game-container">
+    <canvas id="canvas" width="850" height="478"></canvas>
+
+    <!-- INICIO -->
+    <div id="start-screen" class="overlay">
+      <h1>🐝 BETA SEGURIDAD EPP</h1>
+      <p>Recolecta el <b>Equipo de Protección Personal</b>, evita los residuos peligrosos y mantén la fábrica segura.</p>
+      <button class="btn" id="start-btn">¡INICIAR JUEGO!</button>
+    </div>
+
+    <!-- GAME OVER -->
+    <div id="game-over-screen" class="overlay hidden">
+      <h1 style="color: #f87171; text-shadow: 0 0 15px rgba(248, 113, 113, 0.5);">¡ACCIDENTE LABORAL!</h1>
+      <p id="final-score" style="font-size: 1.2rem; font-weight: bold;">Puntaje: 0</p>
+      <p id="final-epp" style="color: #38bdf8;">EPP Cuidadosamente Recogido: 0</p>
+      <button class="btn" id="restart-btn">REINTENTAR</button>
+    </div>
+
+    <div id="controls-hint">Usa Teclas A/D, Flechas o Toca los lados para Moverte | Espacio / Tocar Arriba para Saltar</div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    const startScreen = document.getElementById('start-screen');
+    const gameOverScreen = document.getElementById('game-over-screen');
+    const startBtn = document.getElementById('start-btn');
+    const restartBtn = document.getElementById('restart-btn');
+    const finalScoreTxt = document.getElementById('final-score');
+    const finalEppTxt = document.getElementById('final-epp');
+    // Cargar la imagen del personaje (Abeja.png)
+    const beeImage = new Image();
+    beeImage.src = 'abeja.png';
+    // Cargar la imagen del fondo de la fabrica (fabrica.png)
+    const bgImage = new Image();
+    bgImage.src = 'fabrica.png';
+
+    // Estado del juego
+    let gameState = 'START';
+    let score = 0;
+    let lives = 3;
+    let eppCount = 0;
+    let frame = 0;
+    let gameSpeed = 5;
+
+    // Partículas y Efectos
+    let particles = [];
+    let sparkles = [];
+
+    // Jugador (Abeja)
+    const player = {
+      x: 100,
+      y: 300,
+      width: 105,
+      height: 105,
+      vy: 0,
+      vx: 0,
+      speed: 5.5,
+      gravity: 0.55,
+      jumpForce: -14,
+      groundY: 300,
+      isGrounded: false
+    };
+
+    // Teclas
+    const keys = { left: false, right: false, up: false };
+
+    // Listas de objetos
+    let obstacles = [];
+    let items = [];
+
+    // Tipos de EPP
+    const eppTypes = [
+      { name: 'Casco de Seguridad', color: '#facc15', points: 10, label: '🪖 CASCO' },
+      { name: 'Gafas de Protección', color: '#38bdf8', points: 15, label: '🥽 GAFAS' },
+      { name: 'Guantes Industriales', color: '#34d399', points: 10, label: '🧤 GUANTES' },
+      { name: 'Protectores Auditivos', color: '#f472b6', points: 15, label: '🎧 AUDITIVOS' },
+      { name: 'Chaleco Reflejante', color: '#fb923c', points: 20, label: '🎽 CHALECO' }
+    ];
+
+    // Peligros Industriales
+    const hazardTypes = [
+      { name: 'Barril Químico', color: '#a855f7', hazard: '🛢️ BARRIL' },
+      { name: 'Desecho Tóxico', color: '#22c55e', hazard: '☣️ TÓXICO' },
+      { name: 'Fuga de Fuego', color: '#ef4444', hazard: '🔥 FUEGO' }
+    ];
+
+    // --- CONTROLES ---
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = true;
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = true;
+      if (e.code === 'ArrowUp' || e.code === 'Space' || e.code === 'KeyW') {
+        keys.up = true;
+        jump();
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = false;
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = false;
+      if (e.code === 'ArrowUp' || e.code === 'Space' || e.code === 'KeyW') keys.up = false;
+    });
+
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const touchX = e.touches[0].clientX;
+      const rect = canvas.getBoundingClientRect();
+      const canvasX = (touchX - rect.left) * (canvas.width / rect.width);
+
+      if (canvasX < player.x) {
+        player.vx = -player.speed;
+      } else if (canvasX > player.x + player.width) {
+        player.vx = player.speed;
+      }
+      jump();
+    });
+
+    canvas.addEventListener('touchend', () => { player.vx = 0; });
+
+    function jump() {
+      if (gameState === 'PLAYING' && player.isGrounded) {
+        player.vy = player.jumpForce;
+        player.isGrounded = false;
+      }
+    }
+
+    // --- EFECTOS DE PARTÍCULAS ---
+    function initParticles() {
+      particles = [];
+      for(let i = 0; i < 25; i++) {
+        particles.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * 320,
+          radius: Math.random() * 3 + 1,
+          alpha: Math.random() * 0.4 + 0.1,
+          speedX: Math.random() * 0.5 + 0.2
+        });
+      }
+    }
+
+    function createSparkles(x, y, color) {
+      for (let i = 0; i < 12; i++) {
+        sparkles.push({
+          x: x, y: y,
+          vx: (Math.random() - 0.5) * 8,
+          vy: (Math.random() - 0.5) * 8,
+          life: 1,
+          color: color,
+          size: Math.random() * 4 + 2
+        });
+      }
+    }
+
+    // --- RENDERIZADO VISUAL ---
+    function drawParallaxBackground() {
+  // 1. Dibujar la imagen de fondo estirada a las dimensiones del juego
+  ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+
+  // 2. Partículas de vapor o polvo flotando sobre la imagen (opcional)
+  particles.forEach(p => {
+    p.x -= p.speedX;
+    if (p.x < 0) p.x = canvas.width;
+    ctx.fillStyle = 'rgba(226, 232, 240, ${p.alpha})';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+    function drawPlayer() {
+  ctx.save();
+  ctx.translate(player.x + player.width / 2, player.y + player.height / 2);
+
+  // Rotación dinámica al saltar o caer
+  if (player.vy < 0) ctx.rotate(-0.12);
+  if (player.vy > 0) ctx.rotate(0.12);
+
+  // Sombra proyectada en el suelo
+  ctx.save();
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+  ctx.beginPath();
+  const shadowY = player.groundY + player.height / 2 + 10 - (player.y + player.height / 2);
+  const shadowScale = Math.max(0.3, 1 - shadowY / 150);
+  ctx.ellipse(0, shadowY, 22 * shadowScale, 6 * shadowScale, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // Dibujar la imagen PNG centrada
+  // Se usa -player.width / 2 y -player.height / 2 para alinear el centro con la rotación
+  ctx.drawImage(
+    beeImage, 
+    -player.width / 2, 
+    -player.height / 2, 
+    player.width, 
+    player.height
+  );
+
+  ctx.restore();
+}
+
+    function drawHUD() {
+      // Panel Superior Elegante
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(15, 15, 300, 48, 10);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillText(`Puntos: ${score}`, 30, 44);
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillText(`EPP: ${eppCount}`, 145, 44);
+
+      // Vidas (Iconos de Cascos / Corazones)
+      for (let i = 0; i < lives; i++) {
+        ctx.fillStyle = '#f87171';
+        ctx.font = '16px sans-serif';
+        ctx.fillText('❤️', 235 + (i * 22), 43);
+      }
+    }
+
+    // --- LÓGICA DE JUEGO ---
+    function spawnObjects() {
+      // EPP
+      if (frame % 85 === 0) {
+        const type = eppTypes[Math.floor(Math.random() * eppTypes.length)];
+        items.push({
+          x: canvas.width + 40,
+          y: Math.random() < 0.5 ? 210 : 285,
+          width: 42,
+          height: 42,
+          type: type
+        });
+      }
+
+      // Obstáculos
+      if (frame % 125 === 0) {
+        const type = hazardTypes[Math.floor(Math.random() * hazardTypes.length)];
+        obstacles.push({
+          x: canvas.width + 40,
+          y: 305,
+          width: 45,
+          height: 45,
+          type: type
+        });
+      }
+    }
+
+    function update() {
+      if (gameState !== 'PLAYING') return;
+
+      frame++;
+      gameSpeed = 5.2 + Math.floor(score / 120) * 0.4;
+
+      // Movimiento
+      if (keys.left && player.x > 15) player.x -= player.speed;
+      if (keys.right && player.x < canvas.width - player.width - 15) player.x += player.speed;
+      player.x += player.vx;
+
+      // Gravedad
+      player.vy += player.gravity;
+      player.y += player.vy;
+
+      if (player.y >= player.groundY) {
+        player.y = player.groundY;
+        player.vy = 0;
+        player.isGrounded = true;
+      }
+
+      // Recolección EPP
+      for (let i = items.length - 1; i >= 0; i--) {
+        items[i].x -= gameSpeed;
+
+        if (checkCollision(player, items[i])) {
+          score += items[i].type.points;
+          eppCount++;
+          createSparkles(items[i].x, items[i].y, items[i].type.color);
+          items.splice(i, 1);
+          continue;
+        }
+
+        if (items[i].x < -60) items.splice(i, 1);
+      }
+
+      // Obstáculos
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        obstacles[i].x -= gameSpeed;
+
+        if (checkCollision(player, obstacles[i])) {
+          lives--;
+          createSparkles(player.x + 20, player.y + 20, '#ef4444');
+          obstacles.splice(i, 1);
+          if (lives <= 0) gameOver();
+          continue;
+        }
+
+        if (obstacles[i].x < -60) obstacles.splice(i, 1);
+      }
+
+      // Chispas/Partículas
+      for (let i = sparkles.length - 1; i >= 0; i--) {
+        let s = sparkles[i];
+        s.x += s.vx;
+        s.y += s.vy;
+        s.life -= 0.04;
+        if (s.life <= 0) sparkles.splice(i, 1);
+      }
+
+      spawnObjects();
+    }
+
+    function checkCollision(a, b) {
+      return a.x < b.x + b.width - 8 &&
+             a.x + a.width - 8 > b.x &&
+             a.y < b.y + b.height - 8 &&
+             a.y + a.height - 8 > b.y;
+    }
+
+    function render() {
+      drawParallaxBackground();
+
+      // Renderizar EPP con resplandor
+      items.forEach(item => {
+        ctx.save();
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = item.type.color;
+
+        // Fondo del badge
+        ctx.fillStyle = 'rgba(30, 41, 59, 0.85)';
+        ctx.strokeStyle = item.type.color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(item.x, item.y, item.width, item.height, 8);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = '22px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(item.type.label.split(' ')[0], item.x + item.width / 2, item.y + item.height / 2);
+        ctx.restore();
+      });
+
+      // Renderizar Obstáculos
+      obstacles.forEach(obs => {
+        ctx.save();
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#ef4444';
+
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(obs.x, obs.y, obs.width, obs.height, 8);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = '24px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(obs.type.hazard.split(' ')[0], obs.x + obs.width / 2, obs.y + obs.height / 2);
+        ctx.restore();
+      });
+
+      // Chispas
+      sparkles.forEach(s => {
+        ctx.fillStyle = s.color;
+        ctx.globalAlpha = s.life;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      });
+
+      drawPlayer();
+      drawHUD();
+    }
+
+    function gameLoop() {
+      update();
+      render();
+      if (gameState === 'PLAYING') {
+        requestAnimationFrame(gameLoop);
+      }
+    }
+
+    function startGame() {
+      gameState = 'PLAYING';
+      score = 0;
+      lives = 3;
+      eppCount = 0;
+      frame = 0;
+      obstacles = [];
+      items = [];
+      sparkles = [];
+      player.x = 100;
+      player.y = player.groundY;
+
+      startScreen.classList.add('hidden');
+      gameOverScreen.classList.add('hidden');
+      initParticles();
+      requestAnimationFrame(gameLoop);
+    }
+
+    function gameOver() {
+      gameState = 'GAMEOVER';
+      finalScoreTxt.textContent = `Puntaje Total: ${score}`;
+      finalEppTxt.textContent = `EPP Recolectado: ${eppCount}`;
+      gameOverScreen.classList.remove('hidden');
+    }
+
+    startBtn.addEventListener('click', startGame);
+    restartBtn.addEventListener('click', startGame);
+
+    // Inicialización visual de fondo
+    initParticles();
+    drawParallaxBackground();
+    drawPlayer();
+  </script>
+</body>
+</html>
+
